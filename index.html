@@ -112,8 +112,11 @@ function openExam(id, mode) {
 
 function renderExam(mode) {
   const N = exam.length;
-  const well = exam.filter(q => q.options.length >= 4).length;   // 4–5 options = well transcribed
-  const wellLine = `<p class="muted">${N} questões · <span class="well">${well} bem transcritas</span> (4–5 opções)${mode==='shuffle' ? ' · ordem baralhada' : ''}</p>`;
+  const well = exam.filter(q => q.options.length >= 4 && !q.noanswer).length;   // 4–5 options + has key
+  const noans = exam.filter(q => q.noanswer).length;
+  const wellLine = `<p class="muted">${N} questões · <span class="well">${well} bem transcritas</span> (4–5 opções)`
+    + (noans ? ` · <span style="color:var(--bad)">${noans} sem resposta</span>` : '')
+    + (mode === 'shuffle' ? ' · ordem baralhada' : '') + `</p>`;
   let tabs = '';
   if (mode === 'area') {
     const labels = AREA_ORDER.filter(l => exam.some(q => q.label === l));
@@ -129,7 +132,7 @@ function renderExam(mode) {
       lastLabel = q.label;
     }
     body += `<div class="card" id="q${i}"${mode==='area' ? ` data-area="${escapeHtml(q.label)}"` : ''}>
-        <div class="qhead">Questão ${i+1} / ${N}</div>
+        <div class="qhead">Questão ${i+1} / ${N}${q.noanswer ? ' · <span style="color:var(--bad)">sem resposta</span>' : ''}</div>
         <div>${escapeHtml(q.text)}</div>
         <div>${q.options.map((o,j)=>
           `<label class="opt" data-q="${i}" data-o="${j}">${escapeHtml(o.text)}</label>`).join('')}</div>
@@ -169,20 +172,21 @@ function renderExam(mode) {
 }
 
 function renderResults() {
-  const N = exam.length;
+  const scored = exam.filter(q => !q.noanswer);   // key-less questions don't count
+  const N = scored.length, noans = exam.length - N;
   let score = 0;
-  exam.forEach(q => { if (q.answer!=null && q.options[q.answer].correct) score++; });
+  scored.forEach(q => { if (q.answer!=null && q.options[q.answer].correct) score++; });
   saveScore(curId, score, N);
   const pct = Math.round(100*score/N);
   const perCat = {};
-  exam.forEach(q=>{ const c=perCat[q.label]||(perCat[q.label]={ok:0,tot:0});
+  scored.forEach(q=>{ const c=perCat[q.label]||(perCat[q.label]={ok:0,tot:0});
     c.tot++; if(q.answer!=null&&q.options[q.answer].correct) c.ok++; });
 
   app.innerHTML = `
     <h1>Resultado — Exame ${curId}</h1>
     <div class="card" style="text-align:center">
       <div class="scorebig">${score} / ${N}</div>
-      <div class="muted">${pct}% correto</div>
+      <div class="muted">${pct}% correto${noans ? ` · ${noans} sem resposta não contam` : ''}</div>
       <div class="grid" style="justify-content:center;margin-top:12px">
         ${Object.entries(perCat).map(([k,c])=>`<span class="pill">${k}: ${c.ok}/${c.tot}</span>`).join('')}
       </div>
@@ -201,7 +205,8 @@ function renderResults() {
                      : (q.answer===j ? '<span class="mark" style="color:var(--bad)">✗</span>' : '');
           return `<div class="${cls}">${escapeHtml(o.text)}${mark}</div>`;
         }).join('')}</div>
-        ${q.answer==null?'<div class="muted" style="margin-top:6px">Não respondida</div>':''}
+        ${q.noanswer?'<div class="muted" style="margin-top:6px;color:var(--bad)">Sem resposta correta conhecida (não conta).</div>'
+          : (q.answer==null?'<div class="muted" style="margin-top:6px">Não respondida</div>':'')}
       </div>`).join('');
   document.getElementById('menu').onclick = () => { renderMenu(); window.scrollTo(0,0); };
   window.scrollTo(0,0);
