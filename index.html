@@ -34,6 +34,7 @@
                 align-items:center; justify-content:space-between; }
   .grid { display:flex; flex-wrap:wrap; gap:8px; margin:10px 0; }
   .pill { background:#121a24; border:1px solid var(--line); border-radius:20px; padding:6px 12px; font-size:.85rem; }
+  .areahdr { font-size:1.1rem; color:var(--accent); border-bottom:1px solid var(--line); padding-bottom:6px; margin:28px 0 2px; }
   .tag { font-size:.72rem; text-transform:uppercase; letter-spacing:.05em; padding:3px 9px; border-radius:20px; }
   .tag.fixed { background:#13243b; color:#7db3ff; }
   .tag.random { background:#241f10; color:#e8d48a; }
@@ -69,7 +70,10 @@ function renderMenu() {
         <strong>Exame ${e.id}</strong> ${tag} ${status}
         <div class="muted" style="font-size:.85rem">${e.questions.length} questões</div>
       </div>
-      <button data-ex="${e.id}">${d?'Refazer':'Iniciar'}</button>
+      <div style="display:flex;gap:8px">
+        <button data-ex="${e.id}" data-mode="shuffle">Baralhado</button>
+        <button class="ghost" data-ex="${e.id}" data-mode="area">Por área</button>
+      </div>
     </div>`;
   }).join('');
   app.innerHTML = `
@@ -78,32 +82,45 @@ function renderMenu() {
       Nenhuma questão se repete entre exames.</p>
     ${rows}
     <button class="ghost" id="clear" style="margin-top:12px">Limpar resultados guardados</button>`;
-  app.querySelectorAll('button[data-ex]').forEach(b => b.onclick = () => openExam(+b.dataset.ex));
+  app.querySelectorAll('button[data-ex]').forEach(b => b.onclick = () => openExam(+b.dataset.ex, b.dataset.mode));
   document.getElementById('clear').onclick = () => {
     if (confirm('Apagar os resultados guardados?')) { localStorage.removeItem(SCORES); renderMenu(); }
   };
 }
 
-function openExam(id) {
+const AREA_ORDER = ['Pediatria','Ginecologia','Obstetrícia','Decisão Terapêutica','Outras áreas'];
+
+function openExam(id, mode) {
   const e = window.EXAMS.find(x=>x.id===id);
   curId = id;
-  exam = e.questions.map(q => ({ ...q, answer:null }));   // fresh copy; option order is fixed/baked
-  renderExam(e.type);
+  let qs = e.questions.map(q => ({ ...q, answer:null }));   // fresh copy; option order is baked
+  if (mode === 'area') {                                    // group by area (stable sort keeps baked order within area)
+    qs.sort((a,b)=> AREA_ORDER.indexOf(a.label) - AREA_ORDER.indexOf(b.label));
+  }                                                         // shuffle mode keeps the baked shuffled order
+  exam = qs;
+  renderExam(mode);
   window.scrollTo(0,0);
 }
 
-function renderExam(type) {
+function renderExam(mode) {
   const N = exam.length;
-  const comp = composition(exam);
-  app.innerHTML = `<h1>Exame ${curId}</h1>
-    <div class="grid">${Object.entries(comp).map(([k,v])=>`<span class="pill">${k}: ${v}</span>`).join('')}</div>` +
-    exam.map((q,i)=>`
-      <div class="card" id="q${i}">
-        <div class="qhead">Questão ${i+1} / ${N} · ${q.label}</div>
+  const head = mode === 'area'
+    ? `<div class="grid">${Object.entries(composition(exam)).map(([k,v])=>`<span class="pill">${k}: ${v}</span>`).join('')}</div>`
+    : `<p class="muted">${N} questões · ordem baralhada</p>`;
+  let body = '', lastLabel = null;
+  exam.forEach((q,i)=>{
+    if (mode === 'area' && q.label !== lastLabel) {
+      body += `<h2 class="areahdr">${escapeHtml(q.label)}</h2>`;
+      lastLabel = q.label;
+    }
+    body += `<div class="card" id="q${i}">
+        <div class="qhead">Questão ${i+1} / ${N}</div>
         <div>${escapeHtml(q.text)}</div>
         <div>${q.options.map((o,j)=>
           `<label class="opt" data-q="${i}" data-o="${j}">${escapeHtml(o.text)}</label>`).join('')}</div>
-      </div>`).join('') +
+      </div>`;
+  });
+  app.innerHTML = `<h1>Exame ${curId}</h1>${head}` + body +
     `<div class="bar"><div class="wrapb">
         <span class="muted" id="prog">0 / ${N} respondidas</span>
         <span style="display:flex;gap:10px">
