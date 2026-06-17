@@ -1,0 +1,176 @@
+<!DOCTYPE html>
+<html lang="pt">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Exames — TEM Bloco B</title>
+<style>
+  :root { --bg:#0f1620; --card:#19222e; --line:#2a3645; --txt:#e6edf3; --muted:#8b98a8;
+          --accent:#3d8bfd; --ok:#2ea043; --bad:#e5534b; }
+  * { box-sizing:border-box; }
+  body { margin:0; font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;
+         background:var(--bg); color:var(--txt); line-height:1.45; }
+  .wrap { max-width:860px; margin:0 auto; padding:20px 16px 120px; }
+  h1 { font-size:1.5rem; margin:.2em 0; }
+  .muted { color:var(--muted); }
+  .card { background:var(--card); border:1px solid var(--line); border-radius:12px;
+          padding:18px; margin:16px 0; }
+  .exrow { display:flex; align-items:center; justify-content:space-between; gap:12px; flex-wrap:wrap; }
+  .qhead { font-weight:600; color:var(--accent); margin-bottom:8px; font-size:.85rem;
+           text-transform:uppercase; letter-spacing:.04em; }
+  .opt { display:block; border:1px solid var(--line); border-radius:9px; padding:11px 14px;
+         margin:8px 0; cursor:pointer; transition:.12s; background:#121a24; }
+  .opt:hover { border-color:var(--accent); }
+  .opt.sel { border-color:var(--accent); background:#13243b; }
+  .opt.correct { border-color:var(--ok); background:#0f2417; }
+  .opt.wrong { border-color:var(--bad); background:#2a1414; }
+  .opt .mark { float:right; font-weight:700; }
+  button { font:inherit; border:0; border-radius:9px; padding:11px 20px; cursor:pointer;
+           background:var(--accent); color:#fff; font-weight:600; }
+  button.ghost { background:transparent; border:1px solid var(--line); color:var(--txt); }
+  .bar { position:fixed; left:0; right:0; bottom:0; background:#0c121b; border-top:1px solid var(--line);
+         padding:12px 16px; }
+  .bar .wrapb { max-width:860px; margin:0 auto; width:100%; display:flex; gap:12px;
+                align-items:center; justify-content:space-between; }
+  .grid { display:flex; flex-wrap:wrap; gap:8px; margin:10px 0; }
+  .pill { background:#121a24; border:1px solid var(--line); border-radius:20px; padding:6px 12px; font-size:.85rem; }
+  .tag { font-size:.72rem; text-transform:uppercase; letter-spacing:.05em; padding:3px 9px; border-radius:20px; }
+  .tag.fixed { background:#13243b; color:#7db3ff; }
+  .tag.random { background:#241f10; color:#e8d48a; }
+  .scorebig { font-size:2.4rem; font-weight:700; }
+  .done { color:var(--ok); font-size:.85rem; }
+  hr { border:0; border-top:1px solid var(--line); margin:14px 0; }
+</style>
+</head>
+<body>
+<div class="wrap" id="app"></div>
+<script src="exam_data.js"></script>
+<script>
+const SCORES = 'mle_exam_scores_v2';
+const app = document.getElementById('app');
+let exam = null;        // working copy of current exam questions
+let curId = null;
+
+function scores(){ try { return JSON.parse(localStorage.getItem(SCORES))||{}; } catch { return {}; } }
+function saveScore(id,score,total){ const s=scores(); s[id]={score,total}; localStorage.setItem(SCORES,JSON.stringify(s)); }
+function escapeHtml(s){ return (s||'').replace(/[&<>]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[c])); }
+function composition(qs){ const m={}; qs.forEach(q=>m[q.label]=(m[q.label]||0)+1); return m; }
+
+function renderMenu() {
+  exam=null; curId=null;
+  const done = scores();
+  const rows = window.EXAMS.map(e=>{
+    const d = done[e.id];
+    const tag = e.type==='fixed' ? '<span class="tag fixed">composição fixa</span>'
+                                 : '<span class="tag random">aleatório</span>';
+    const status = d ? `<span class="done">✓ ${d.score}/${d.total}</span>` : '';
+    return `<div class="card exrow">
+      <div>
+        <strong>Exame ${e.id}</strong> ${tag} ${status}
+        <div class="muted" style="font-size:.85rem">${e.questions.length} questões</div>
+      </div>
+      <button data-ex="${e.id}">${d?'Refazer':'Iniciar'}</button>
+    </div>`;
+  }).join('');
+  app.innerHTML = `
+    <h1>Exames — TEM Bloco B</h1>
+    <p class="muted">${window.EXAMS.length} exames fixos, iguais para todos. As respostas só aparecem no fim.
+      Nenhuma questão se repete entre exames.</p>
+    ${rows}
+    <button class="ghost" id="clear" style="margin-top:12px">Limpar resultados guardados</button>`;
+  app.querySelectorAll('button[data-ex]').forEach(b => b.onclick = () => openExam(+b.dataset.ex));
+  document.getElementById('clear').onclick = () => {
+    if (confirm('Apagar os resultados guardados?')) { localStorage.removeItem(SCORES); renderMenu(); }
+  };
+}
+
+function openExam(id) {
+  const e = window.EXAMS.find(x=>x.id===id);
+  curId = id;
+  exam = e.questions.map(q => ({ ...q, answer:null }));   // fresh copy; option order is fixed/baked
+  renderExam(e.type);
+  window.scrollTo(0,0);
+}
+
+function renderExam(type) {
+  const N = exam.length;
+  const comp = composition(exam);
+  app.innerHTML = `<h1>Exame ${curId}</h1>
+    <div class="grid">${Object.entries(comp).map(([k,v])=>`<span class="pill">${k}: ${v}</span>`).join('')}</div>` +
+    exam.map((q,i)=>`
+      <div class="card" id="q${i}">
+        <div class="qhead">Questão ${i+1} / ${N} · ${q.label}</div>
+        <div>${escapeHtml(q.text)}</div>
+        <div>${q.options.map((o,j)=>
+          `<label class="opt" data-q="${i}" data-o="${j}">${escapeHtml(o.text)}</label>`).join('')}</div>
+      </div>`).join('') +
+    `<div class="bar"><div class="wrapb">
+        <span class="muted" id="prog">0 / ${N} respondidas</span>
+        <span style="display:flex;gap:10px">
+          <button class="ghost" id="quit">Sair</button>
+          <button id="submit">Terminar e ver respostas</button>
+        </span>
+     </div></div>`;
+  app.querySelectorAll('.opt').forEach(el => el.onclick = () => {
+    const qi=+el.dataset.q, oi=+el.dataset.o;
+    exam[qi].answer = oi;
+    document.querySelectorAll(`#q${qi} .opt`).forEach(x=>x.classList.remove('sel'));
+    el.classList.add('sel');
+    document.getElementById('prog').textContent =
+      `${exam.filter(q=>q.answer!=null).length} / ${N} respondidas`;
+  });
+  document.getElementById('quit').onclick = () => { if (confirm('Sair sem ver respostas?')) renderMenu(); };
+  document.getElementById('submit').onclick = () => {
+    const left = exam.filter(q=>q.answer==null).length;
+    if (left && !confirm(`${left} questões sem resposta. Terminar mesmo assim?`)) return;
+    renderResults();
+  };
+}
+
+function renderResults() {
+  const N = exam.length;
+  let score = 0;
+  exam.forEach(q => { if (q.answer!=null && q.options[q.answer].correct) score++; });
+  saveScore(curId, score, N);
+  const pct = Math.round(100*score/N);
+  const perCat = {};
+  exam.forEach(q=>{ const c=perCat[q.label]||(perCat[q.label]={ok:0,tot:0});
+    c.tot++; if(q.answer!=null&&q.options[q.answer].correct) c.ok++; });
+
+  app.innerHTML = `
+    <h1>Resultado — Exame ${curId}</h1>
+    <div class="card" style="text-align:center">
+      <div class="scorebig">${score} / ${N}</div>
+      <div class="muted">${pct}% correto</div>
+      <div class="grid" style="justify-content:center;margin-top:12px">
+        ${Object.entries(perCat).map(([k,c])=>`<span class="pill">${k}: ${c.ok}/${c.tot}</span>`).join('')}
+      </div>
+    </div>
+    <div style="display:flex;gap:12px;flex-wrap:wrap;margin:8px 0 16px">
+      <button id="menu">Voltar aos exames</button>
+    </div>` +
+    exam.map((q,i)=>`<div class="card">
+        <div class="qhead">Questão ${i+1} · ${q.label}</div>
+        <div>${escapeHtml(q.text)}</div>
+        <div>${q.options.map((o,j)=>{
+          let cls='opt';
+          if (o.correct) cls+=' correct';
+          if (q.answer===j && !o.correct) cls+=' wrong';
+          const mark = o.correct ? '<span class="mark" style="color:var(--ok)">✓</span>'
+                     : (q.answer===j ? '<span class="mark" style="color:var(--bad)">✗</span>' : '');
+          return `<div class="${cls}">${escapeHtml(o.text)}${mark}</div>`;
+        }).join('')}</div>
+        ${q.answer==null?'<div class="muted" style="margin-top:6px">Não respondida</div>':''}
+      </div>`).join('');
+  document.getElementById('menu').onclick = () => { renderMenu(); window.scrollTo(0,0); };
+  window.scrollTo(0,0);
+}
+
+if (typeof window.EXAMS === 'undefined') {
+  app.innerHTML = '<h1>Erro</h1><p>exam_data.js não encontrado. Corre <code>python3 build_exam_data.py</code> primeiro.</p>';
+} else {
+  renderMenu();
+}
+</script>
+</body>
+</html>
