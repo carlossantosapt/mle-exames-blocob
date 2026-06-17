@@ -35,6 +35,14 @@
   .grid { display:flex; flex-wrap:wrap; gap:8px; margin:10px 0; }
   .pill { background:#121a24; border:1px solid var(--line); border-radius:20px; padding:6px 12px; font-size:.85rem; }
   .areahdr { font-size:1.1rem; color:var(--accent); border-bottom:1px solid var(--line); padding-bottom:6px; margin:28px 0 2px; }
+  .chip { cursor:pointer; user-select:none; background:#121a24; border:1px solid var(--line); border-radius:22px;
+          padding:9px 15px; font-size:.92rem; display:inline-flex; align-items:center; gap:9px; transition:.12s; }
+  .chip:hover { border-color:var(--accent); }
+  .chip .box { width:18px; height:18px; border-radius:5px; border:1px solid var(--line);
+               display:inline-flex; align-items:center; justify-content:center; font-size:.7rem; color:transparent; }
+  .chip .cnt { color:var(--muted); font-size:.82rem; }
+  .chip.sel { border-color:var(--accent); background:#13243b; }
+  .chip.sel .box { background:var(--accent); color:#fff; border-color:var(--accent); }
   .tag { font-size:.72rem; text-transform:uppercase; letter-spacing:.05em; padding:3px 9px; border-radius:20px; }
   .tag.fixed { background:#13243b; color:#7db3ff; }
   .tag.random { background:#241f10; color:#e8d48a; }
@@ -51,6 +59,7 @@ const SCORES = 'mle_exam_scores_v2';
 const app = document.getElementById('app');
 let exam = null;        // working copy of current exam questions
 let curId = null;
+let curFull = true;     // false when only a subset of areas is selected
 
 function scores(){ try { return JSON.parse(localStorage.getItem(SCORES))||{}; } catch { return {}; } }
 function saveScore(id,score,total){ const s=scores(); s[id]={score,total}; localStorage.setItem(SCORES,JSON.stringify(s)); }
@@ -82,7 +91,10 @@ function renderMenu() {
       Nenhuma questão se repete entre exames.</p>
     ${rows}
     <button class="ghost" id="clear" style="margin-top:12px">Limpar resultados guardados</button>`;
-  app.querySelectorAll('button[data-ex]').forEach(b => b.onclick = () => openExam(+b.dataset.ex, b.dataset.mode));
+  app.querySelectorAll('button[data-ex]').forEach(b => b.onclick = () => {
+    const id = +b.dataset.ex;
+    if (b.dataset.mode === 'area') renderAreaSelect(id); else openExam(id, 'shuffle');
+  });
   document.getElementById('clear').onclick = () => {
     if (confirm('Apagar os resultados guardados?')) { localStorage.removeItem(SCORES); renderMenu(); }
   };
@@ -90,13 +102,48 @@ function renderMenu() {
 
 const AREA_ORDER = ['Pediatria','Ginecologia','Obstetrícia','Decisão Terapêutica','Outras áreas'];
 
-function openExam(id, mode) {
+function renderAreaSelect(id) {
+  const e = window.EXAMS.find(x=>x.id===id);
+  const comp = composition(e.questions);
+  const labels = AREA_ORDER.filter(l => comp[l]);
+  const sel = new Set(labels);                              // all areas selected by default
+  const draw = () => {
+    app.querySelectorAll('.chip').forEach(c => c.classList.toggle('sel', sel.has(c.dataset.label)));
+    const total = [...sel].reduce((s,l)=>s+comp[l], 0);
+    document.getElementById('cnt').textContent = total;
+    document.getElementById('start').disabled = total === 0;
+  };
+  app.innerHTML = `
+    <h1>Exame ${id} · por área</h1>
+    <p class="muted">Toca para escolher as áreas a incluir.</p>
+    <div class="grid">${labels.map(l=>`
+      <label class="chip" data-label="${l}"><span class="box">✓</span>${l}<span class="cnt">${comp[l]}</span></label>`).join('')}</div>
+    <div style="display:flex;gap:10px;flex-wrap:wrap;margin-top:16px">
+      <button id="start">Iniciar — <span id="cnt"></span> questões</button>
+      <button class="ghost" id="all">Todas</button>
+      <button class="ghost" id="none">Nenhuma</button>
+      <button class="ghost" id="back">Voltar</button>
+    </div>`;
+  app.querySelectorAll('.chip').forEach(c => c.onclick = () => {
+    const l = c.dataset.label; sel.has(l) ? sel.delete(l) : sel.add(l); draw();
+  });
+  document.getElementById('all').onclick  = () => { labels.forEach(l=>sel.add(l)); draw(); };
+  document.getElementById('none').onclick = () => { sel.clear(); draw(); };
+  document.getElementById('back').onclick = () => renderMenu();
+  document.getElementById('start').onclick = () => { if (sel.size) openExam(id, 'area', sel); };
+  draw();
+  window.scrollTo(0,0);
+}
+
+function openExam(id, mode, areaFilter) {
   const e = window.EXAMS.find(x=>x.id===id);
   curId = id;
   let qs = e.questions.map(q => ({ ...q, answer:null }));   // fresh copy; option order is baked
-  if (mode === 'area') {                                    // group by area (stable sort keeps baked order within area)
-    qs.sort((a,b)=> AREA_ORDER.indexOf(a.label) - AREA_ORDER.indexOf(b.label));
+  if (mode === 'area') {
+    if (areaFilter) qs = qs.filter(q => areaFilter.has(q.label));
+    qs.sort((a,b)=> AREA_ORDER.indexOf(a.label) - AREA_ORDER.indexOf(b.label));  // stable: keeps baked order within area
   }                                                         // shuffle mode keeps the baked shuffled order
+  curFull = qs.length === e.questions.length;
   exam = qs;
   renderExam(mode);
   window.scrollTo(0,0);
@@ -148,7 +195,7 @@ function renderResults() {
   const N = exam.length;
   let score = 0;
   exam.forEach(q => { if (q.answer!=null && q.options[q.answer].correct) score++; });
-  saveScore(curId, score, N);
+  if (curFull) saveScore(curId, score, N);                 // partial (area-subset) runs are not saved
   const pct = Math.round(100*score/N);
   const perCat = {};
   exam.forEach(q=>{ const c=perCat[q.label]||(perCat[q.label]={ok:0,tot:0});
@@ -163,6 +210,7 @@ function renderResults() {
         ${Object.entries(perCat).map(([k,c])=>`<span class="pill">${k}: ${c.ok}/${c.tot}</span>`).join('')}
       </div>
     </div>
+    ${curFull ? '' : '<p class="muted">Resultado parcial (áreas selecionadas) — não guardado.</p>'}
     <div style="display:flex;gap:12px;flex-wrap:wrap;margin:8px 0 16px">
       <button id="menu">Voltar aos exames</button>
     </div>` +
